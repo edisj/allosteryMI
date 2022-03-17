@@ -24,7 +24,7 @@ class Base:
         data = {}
         config_file = Path.cwd() / 'reactions.cfg'
         with open(config_file) as file:
-            data.update(yaml.load(file, Loader=YLoader))
+            data.update(yaml.load(file, Loader=CLoader))
 
         return data
             
@@ -95,8 +95,9 @@ class MasterEquation(Base):
         
         self.initial_state = None
         self.constitutive_states = None
-        self.generator_matrix_strings = None
+        self.constitutive_states_strings = None
         self.generator_matrix= None
+        self.generator_matrix_strings = None
         self.P_t = None
         
         self._initial_species = initial_species
@@ -121,7 +122,6 @@ class MasterEquation(Base):
         
         constitutive_states = [list(self.initial_state)]
         newly_added_unique_states = [self.initial_state]
-        
         while True:
             accepted_candidate_states = []
             for state in newly_added_unique_states:
@@ -139,7 +139,19 @@ class MasterEquation(Base):
             if not newly_added_unique_states:
                 break
         
+        constitutive_states_strings = []
+        for state in constitutive_states:
+            word = []
+            for quantity, species in zip(state, self.species):
+                if quantity == 0 and 'E' in species:
+                    pass
+                else:
+                    word.append(f'{quantity}{species}')
+                    
+            constitutive_states_strings.append(word)
+        
         self.constitutive_states = constitutive_states
+        self.constitutive_states_strings =  constitutive_states_strings
         
     def _set_generator_matrices(self):
         
