@@ -157,7 +157,7 @@ class MasterEquation(Base):
         
         N = len(self.constitutive_states)
         
-        generator_matrix_values = np.zeros(shape=(N,N), dtype=np.int32)
+        generator_matrix_values = np.empty(shape=(N,N), dtype=np.int32)
         generator_matrix_strings = []
         
         for i in range(N):
@@ -165,17 +165,18 @@ class MasterEquation(Base):
             state_i = self.constitutive_states[i]
             for j in range(N):
                 state_j = self.constitutive_states[j]
+                
+                if i == j:
+                    rate_string = '-'
+                    rate_value = 0
                 for k, reaction in enumerate(self.reaction_matrix):
                     if list(state_i + reaction) == state_j:
                         rate_string = fr'{self.rate_strings[k]}'
                         rate_value = self.rate_values[k]
                         break
-                    elif i == j:
-                        rate_string = '-'
-                        rate_value = 0
-                    else:
-                        rate_string = '0'
-                        rate_value = 0
+                else:
+                    rate_string = '0'
+                    rate_value = 0
                         
                 new_row.append(rate_string)
                 generator_matrix_values[i][j] = rate_value
