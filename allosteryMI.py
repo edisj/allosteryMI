@@ -1,7 +1,5 @@
-import yaml
 from yaml import CLoader
 import numpy as np
-import pandas as pd
 from scipy.sparse import linalg
 from pathlib import Path
 from tqdm import tqdm
@@ -11,13 +9,20 @@ class Base:
     
     def __init__(self):
         
-        self.species = None
-        self.reaction_matrix = None
-        self.rate_strings = None
-        self.rate_values = None
+        self._species = None
+        self._reaction_matrix = None
+        self._rates_from_config = None
+        self._rates = None
+        self._rate_strings = None
+        self._reactants = None
+        self._products = None
         
         self._data = self._load_data_from_yaml()
         self._process_data_from_config()
+        
+        self._initialize_species_vector()
+        self._initialize_reaction_matrix()
+        self._initialize_rates()
     
     def _load_data_from_yaml(self):
         
@@ -36,13 +41,15 @@ class Base:
         reactants = [reactant.split('+') for reactant in reactants]
         products = [reaction.split("->")[1] for reaction in reactions]
         products = [product.split('+') for product in products]
-        n_reactions = len(reactions)
         
-        self._set_all_species(reactants, products)
-        self._set_reaction_matrix(reactants, products, n_reactions)
-        self._set_rates()
+        self._reactants = reactants
+        self._products = products
+        self._rates_from_config = self._data['rates']
+    
+    def _initialize_species_vector(self):
         
-    def _set_all_species(self, reactants, products):
+        reactants = self._reactants
+        products = self._products
         
         all_species = []
         for reactant, product in zip(reactants, products):
@@ -54,9 +61,12 @@ class Base:
         all_species.remove('0')
         all_species = sorted(list(set(all_species)))
         
-        self.species = all_species
+        self._species = all_species
     
-    def _set_reaction_matrix(self, reactants, products, n_reactions):
+    def _initialize_reaction_matrix(self):
+        
+        reactants = self._reactants
+        products = self._products
         
         n_reactions = len([list(reaction.keys())[0] for reaction in self._data['reactions']])
         n_species = len(self.species)
@@ -70,19 +80,35 @@ class Base:
                 if species in product:
                     row[i] += 1
         
-        self.reaction_matrix = reaction_matrix
+        self._reaction_matrix = reaction_matrix
     
-    def _set_rates(self):
+    def _initialize_rates(self):
         
+        rates_dictionary = self._rates_from_config
         rate_strings = [list(reaction.values())[0] for reaction in self._data['reactions']]
-        
         rate_values = np.empty(shape=len(rate_strings))
-        rates = self._data['rates']
-        for i, rate in enumerate(rate_strings):
-            rate_values[i] = rates[rate]
         
-        self.rate_strings = rate_strings
-        self.rate_values = rate_values
+        for i, rate in enumerate(rate_strings):
+            rate_values[i] = rates_dictionary[rate]
+        
+        self._rates = rate_values
+        self._rate_strings = rate_strings
+    
+    @property
+    def species(self):
+        return self._species
+    
+    @property
+    def reaction_matrix(self):
+        return self._reaction_matrix
+    
+    @property
+    def rates(self):
+        return self._rates
+    
+    @property
+    def rate_strings(self):
+        return self._rate_strings
     
     def run(self):
         pass
@@ -143,10 +169,10 @@ class MasterEquation(Base):
         for state in constitutive_states:
             word = []
             for quantity, species in zip(state, self.species):
-                if quantity == 0 and 'E' in species:
-                    pass
-                else:
-                    word.append(f'{quantity}{species}')
+                #if quantity == 0 and 'E' in species:
+                #    pass
+                #else:
+                word.append(f'{quantity}{species}')
                     
             constitutive_states_strings.append(word)
         
@@ -172,7 +198,7 @@ class MasterEquation(Base):
                 for k, reaction in enumerate(self.reaction_matrix):
                     if list(state_i + reaction) == state_j:
                         rate_string = fr'{self.rate_strings[k]}'
-                        rate_value = self.rate_values[k]
+                        rate_value = self.rates[k]
                         break
                 else:
                     rate_string = '0'
@@ -188,6 +214,13 @@ class MasterEquation(Base):
         
         self.generator_matrix_strings = generator_matrix_strings
         self.generator_matrix = generator_matrix_values
+    
+    def update_rates(self, new_rates):
+        
+        for key, value in new_rates.items():
+            self._rates_from_config[key] = value
+        self._initialize_rates()
+        self._set_generator_matrices()
     
     def run(self, start=None, stop=None, step=None):
         
@@ -208,11 +241,63 @@ class MasterEquation(Base):
         Gt = self.generator_matrix * dt
         propagator = linalg.expm(Gt)
         
-        for i in tqdm(range(n_steps - 1)):
+        for i in tqdm(range(n_steps - 1)): 
             P_t[i+1] = P_t[i].dot(propagator)
     
         self.P_t = P_t
+    
+    def calculate_mutual_information(self, X, Y):
         
+        X = sorted(X)
+        Y = sorted(Y)
+        
+        indices_X = [self.species.index(x) for x in X]
+        indices_Y = [self.species.index(y) for y in Y]
+        
+        constitutive_states = np.array(self.constitutive_states)
+        x_states = constitutive_states[:, indices_X]
+        y_states = constitutive_states[:, indices_Y]
+        assert len(x_states) == len(y_states)
+        n_states = len(x_states)
+        
+        X_set = []
+        for vector in x_states:
+            if list(vector) not in X_set:
+                X_set.append(list(vector))
+        X_set = np.array(X_set)
+        
+        Y_set = []
+        for vector in y_states:
+            if list(vector) not in Y_set:
+                Y_set.append(list(vector))
+        Y_set = np.array(Y_set)
+
+        P = self.P_t[-1]
+        def _single_term(x, y):
+            p_xy = 0
+            p_x = 0
+            p_y = 0
+            for i in range(n_states):
+                if np.array_equal(x, x_states[i]) and np.array_equal(y, y_states[i]):
+                    p_xy += P[i]
+                if np.array_equal(x, x_states[i]):
+                    p_x += P[i]
+                if np.array_equal(y, y_states[i]):
+                    p_y += P[i]
+            
+            MI_term = p_xy * (np.log(p_xy) - np.log(p_x) - np.log(p_y))
+            
+            return MI_term
+        
+        mutual_information = 0
+        for x in X_set:
+            for y in Y_set:
+                term = _single_term(x, y)
+                mutual_information += term
+                
+                
+        return mutual_information
+                
 class Gillespie(Base):
     
     def __init__(self):
