@@ -286,10 +286,12 @@ class MasterEquation(Base):
                 if np.array_equal(y, y_states[i]):
                     p_y += P[i]
 
-            try:
-                MI_term = p_xy * (np.log(p_xy) - np.log(p_x) - np.log(p_y))
-            except:
+
+            if p_xy == 0:
                 MI_term = 0
+            else:
+                MI_term = p_xy * np.log(p_xy / (p_x*p_y))
+
 
             return MI_term
 
