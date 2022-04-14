@@ -8,8 +8,9 @@ from tqdm import tqdm
 
 class Base:
 
-    def __init__(self):
+    def __init__(self, cfg='reactions.cfg'):
 
+        self.cfg_location = cfg
         self._species = None
         self._reaction_matrix = None
         self._rates_from_config = None
@@ -28,7 +29,7 @@ class Base:
     def _load_data_from_yaml(self):
 
         data = {}
-        config_file = Path.cwd() / 'reactions.cfg'
+        config_file = Path.cwd() / self.cfg_location
         with open(config_file) as file:
             data.update(yaml.load(file, Loader=CLoader))
 
@@ -59,7 +60,8 @@ class Base:
             for species in product:
                 all_species.append(species)
 
-        all_species.remove('0')
+        if '0' in all_species:
+            all_species.remove('0')
         all_species = sorted(list(set(all_species)))
 
         self._species = all_species
@@ -117,8 +119,8 @@ class Base:
 
 class MasterEquation(Base):
 
-    def __init__(self, initial_species=None):
-        super(MasterEquation, self).__init__()
+    def __init__(self, initial_species=None, cfg='reactions.cfg'):
+        super(MasterEquation, self).__init__(cfg)
 
         self.initial_state = None
         self.constitutive_states = None
@@ -284,6 +286,7 @@ class MasterEquation(Base):
                 if np.array_equal(x, x_states[i]):
                     p_x += P[i]
                 if np.array_equal(y, y_states[i]):
+
                     p_y += P[i]
 
 
